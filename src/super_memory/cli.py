@@ -8,7 +8,7 @@ import sys
 from datetime import date as date_type
 from pathlib import Path
 
-from . import parser_claude, parser_codex, parser_kimi, parser_opencode, parser_trae
+from . import parser_claude, parser_codex, parser_dsh, parser_kimi, parser_opencode, parser_trae
 from .distill import DistillError, distill, load_config, validate_ops
 from .search import build_injection, search
 from .state import DEFAULT_STATE_DIR, State
@@ -34,6 +34,8 @@ def _resolve_sources(selected: list[str] | None) -> list[str]:
         found.append("claude")
     if parser_trae.default_projects_dir().is_dir():
         found.append("trae")
+    if parser_dsh.default_dsh_home().is_dir():
+        found.append("dsh")
     return found or ["codex"]
 
 
@@ -53,7 +55,8 @@ def _seed_db_cursors(state: State, db_keys: list[str]) -> None:
 
 def _source_units(source: str, state: State, sessions_dir: Path | None, storage_dir: Path | None,
                   db_path: Path | None, kimi_home: Path | None,
-                  claude_home: Path | None, trae_home: Path | None) -> list[tuple[str, str]]:
+                  claude_home: Path | None, trae_home: Path | None,
+                  dsh_home: Path | None) -> list[tuple[str, str]]:
     if source == "codex":
         cdir = sessions_dir or parser_codex.DEFAULT_SESSIONS_DIR
         return [(str(p), "codex") for p in parser_codex.find_log_files(cdir)]
@@ -66,6 +69,9 @@ def _source_units(source: str, state: State, sessions_dir: Path | None, storage_
     if source == "trae":
         thome = trae_home or parser_trae.default_trae_home()
         return [(str(p), "trae") for p in parser_trae.find_log_files(thome)]
+    if source == "dsh":
+        dhome = dsh_home or parser_dsh.default_dsh_home()
+        return [(str(p), "dsh") for p in parser_dsh.find_sessions(dhome)]
     db = db_path or parser_opencode.default_db_path()
     if db.is_file():
         keys = parser_opencode.find_db_sessions(db)
@@ -84,6 +90,8 @@ def _parse_unit(key: str, source: str, cursor: int):
         return parser_claude.parse_file(Path(key), cursor)
     if source == "trae":
         return parser_trae.parse_file(Path(key), cursor)
+    if source == "dsh":
+        return parser_dsh.parse_session(Path(key), cursor)
     return parser_opencode.parse_unit(key, cursor)
 
 
@@ -102,18 +110,21 @@ def _render_unit(transcript, source: str) -> str:
         return parser_claude.render_transcript(transcript)
     if source == "trae":
         return parser_trae.render_transcript(transcript)
+    if source == "dsh":
+        return parser_dsh.render_transcript(transcript)
     return parser_opencode.render_transcript(transcript)
 
 
 def _collect_pending(state: State, limit: int = 0, sources: list[str] | None = None,
                      sessions_dir: Path | None = None, storage_dir: Path | None = None,
                      db_path: Path | None = None, kimi_home: Path | None = None,
-                     claude_home: Path | None = None, trae_home: Path | None = None) -> list[dict]:
+                     claude_home: Path | None = None, trae_home: Path | None = None,
+                     dsh_home: Path | None = None) -> list[dict]:
     """Parse every enabled source past its saved cursor; return pending session chunks."""
     pending = []
     units: list[tuple[str, str]] = []
     for source in _resolve_sources(sources):
-        units += _source_units(source, state, sessions_dir, storage_dir, db_path, kimi_home, claude_home, trae_home)
+        units += _source_units(source, state, sessions_dir, storage_dir, db_path, kimi_home, claude_home, trae_home, dsh_home)
     for key, source in units:
         if limit and len(pending) >= limit:
             break
@@ -149,9 +160,10 @@ def cmd_ingest(args) -> int:
     kimi_home = Path(args.kimi_home).expanduser() if args.kimi_home else None
     claude_home = Path(args.claude_home).expanduser() if args.claude_home else None
     trae_home = Path(args.trae_home).expanduser() if args.trae_home else None
+    dsh_home = Path(args.dsh_home).expanduser() if args.dsh_home else None
     units: list[tuple[str, str]] = []
     for source in _resolve_sources(args.source):
-        units += _source_units(source, state, sessions_dir, storage_dir, db_path, kimi_home, claude_home, trae_home)
+        units += _source_units(source, state, sessions_dir, storage_dir, db_path, kimi_home, claude_home, trae_home, dsh_home)
     if not units:
         print("No session logs found for enabled sources", file=sys.stderr)
         return 1
@@ -225,9 +237,10 @@ def cmd_pending(args) -> int:
     kimi_home = Path(args.kimi_home).expanduser() if args.kimi_home else None
     claude_home = Path(args.claude_home).expanduser() if args.claude_home else None
     trae_home = Path(args.trae_home).expanduser() if args.trae_home else None
+    dsh_home = Path(args.dsh_home).expanduser() if args.dsh_home else None
     pending = _collect_pending(state, limit=args.limit, sources=args.source,
                                sessions_dir=sessions_dir, storage_dir=storage_dir, db_path=db_path,
-                               kimi_home=kimi_home, claude_home=claude_home, trae_home=trae_home)
+                               kimi_home=kimi_home, claude_home=claude_home, trae_home=trae_home, dsh_home=dsh_home)
     state.save()
 
     if args.json:
@@ -341,7 +354,7 @@ def cmd_status(args) -> int:
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
         prog="supermemory",
-        description="Distill AI agent (codex / opencode / Kimi Code / Claude Code / Trae) session logs into an LLM-curated memory wiki.",
+        description="Distill AI agent (codex / opencode / Kimi Code / Claude Code / Trae / dsh) session logs into an LLM-curated memory wiki.",
     )
     ap.add_argument("--wiki-dir", default=str(DEFAULT_WIKI_DIR), help="wiki directory (default: ~/.super-memory/wiki)")
     ap.add_argument("--state-dir", default=str(DEFAULT_STATE_DIR), help="state directory (default: ~/.super-memory)")
@@ -354,7 +367,8 @@ def main(argv: list[str] | None = None) -> int:
     p_ingest.add_argument("--kimi-home", default=None, help="Kimi Code data dir (default: $KIMI_CODE_HOME or ~/.kimi-code)")
     p_ingest.add_argument("--claude-home", default=None, help="Claude Code data dir (default: $CLAUDE_CONFIG_DIR or ~/.claude)")
     p_ingest.add_argument("--trae-home", default=None, help="Trae data dir (default: $TRAE_HOME, ~/.trae-cn or ~/.trae)")
-    p_ingest.add_argument("--source", choices=["codex", "opencode", "kimi", "claude", "trae"], action="append", default=None,
+    p_ingest.add_argument("--dsh-home", default=None, help="dsh (deepseek-harness) data dir (default: $DSH_HOME or ~/.dsh)")
+    p_ingest.add_argument("--source", choices=["codex", "opencode", "kimi", "claude", "trae", "dsh"], action="append", default=None,
                           help="harness to read (repeatable; default: auto-detect all present)")
     p_ingest.add_argument("--reprocess", action="store_true", help="ignore saved offsets and redo everything")
     p_ingest.add_argument("--dry-run", action="store_true", help="print transcripts, do not call the LLM or write the wiki")
@@ -367,7 +381,8 @@ def main(argv: list[str] | None = None) -> int:
     p_pending.add_argument("--kimi-home", default=None, help="Kimi Code data dir (default: $KIMI_CODE_HOME or ~/.kimi-code)")
     p_pending.add_argument("--claude-home", default=None, help="Claude Code data dir (default: $CLAUDE_CONFIG_DIR or ~/.claude)")
     p_pending.add_argument("--trae-home", default=None, help="Trae data dir (default: $TRAE_HOME, ~/.trae-cn or ~/.trae)")
-    p_pending.add_argument("--source", choices=["codex", "opencode", "kimi", "claude", "trae"], action="append", default=None,
+    p_pending.add_argument("--dsh-home", default=None, help="dsh (deepseek-harness) data dir (default: $DSH_HOME or ~/.dsh)")
+    p_pending.add_argument("--source", choices=["codex", "opencode", "kimi", "claude", "trae", "dsh"], action="append", default=None,
                            help="harness to read (repeatable; default: auto-detect all present)")
     p_pending.add_argument("--json", action="store_true", help="emit JSON checkpoint usable by 'apply'")
     p_pending.add_argument("--limit", type=int, default=0, help="max sessions per batch (0 = all)")

@@ -9,6 +9,7 @@ OPENCODE_CONFIG_HOME="${OPENCODE_CONFIG_HOME:-${XDG_CONFIG_HOME:-$HOME/.config}/
 KIMI_CODE_HOME="${KIMI_CODE_HOME:-$HOME/.kimi-code}"
 CLAUDE_CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 TRAE_HOME="${TRAE_HOME:-$([[ -d "$HOME/.trae-cn" ]] && echo "$HOME/.trae-cn" || echo "$HOME/.trae")}"
+DSH_HOME="${DSH_HOME:-$HOME/.dsh}"
 PURGE=0
 HARNESSES=()
 
@@ -17,7 +18,7 @@ for arg in "$@"; do
         --purge) PURGE=1 ;;
         --harness=*) HARNESSES+=("${arg#--harness=}") ;;
         -h|--help)
-            echo "usage: ./uninstall.sh [--purge] [--harness codex|opencode|kimi|claude|trae|all]"
+            echo "usage: ./uninstall.sh [--purge] [--harness codex|opencode|kimi|claude|trae|dsh|all]"
             exit 0 ;;
         *) echo "unknown option: $arg" >&2; exit 2 ;;
     esac
@@ -28,12 +29,14 @@ want_opencode=0
 want_kimi=0
 want_claude=0
 want_trae=0
+want_dsh=0
 if [[ ${#HARNESSES[@]} -eq 0 || " ${HARNESSES[*]} " == *" all "* ]]; then
     want_codex=1
     want_opencode=1
     want_kimi=1
     want_claude=1
     want_trae=1
+    want_dsh=1
 else
     for h in "${HARNESSES[@]}"; do
         case "$h" in
@@ -42,7 +45,8 @@ else
             kimi) want_kimi=1 ;;
             claude) want_claude=1 ;;
             trae) want_trae=1 ;;
-            *) echo "unknown harness: $h（可选 codex|opencode|kimi|claude|trae|all）" >&2; exit 2 ;;
+            dsh) want_dsh=1 ;;
+            *) echo "unknown harness: $h（可选 codex|opencode|kimi|claude|trae|dsh|all）" >&2; exit 2 ;;
         esac
     done
 fi
@@ -58,7 +62,7 @@ remove_agents_block() {
 }
 
 # launchd 定时任务服务所有 harness，只在整体卸载（缺省 all）时移除
-if [[ $want_codex -eq 1 && $want_opencode -eq 1 && $want_kimi -eq 1 && $want_claude -eq 1 && $want_trae -eq 1 && "$(uname)" == "Darwin" ]]; then
+if [[ $want_codex -eq 1 && $want_opencode -eq 1 && $want_kimi -eq 1 && $want_claude -eq 1 && $want_trae -eq 1 && $want_dsh -eq 1 && "$(uname)" == "Darwin" ]]; then
     step "卸载 launchd 定时任务"
     launchctl bootout "gui/$(id -u)/com.supermemory.digest" 2>/dev/null || true
     rm -f "$HOME/Library/LaunchAgents/com.supermemory.digest.plist"
@@ -104,6 +108,12 @@ if [[ $want_trae -eq 1 ]]; then
     "$PYBIN" "$REPO_DIR/scripts/trae_skill_config.py" remove \
         --trae-home "$TRAE_HOME" 2>/dev/null \
         || echo "跳过 skill-config.json 清理（python 不可用或配置不存在）"
+fi
+
+if [[ $want_dsh -eq 1 ]]; then
+    step "移除 dsh skill 与 AGENTS.md 协议块"
+    rm -rf "$DSH_HOME/skills/super-memory"
+    remove_agents_block "$DSH_HOME/AGENTS.md"
 fi
 
 if [[ "$PURGE" -eq 1 ]]; then

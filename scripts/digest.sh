@@ -56,7 +56,9 @@ elif command -v kimi >/dev/null 2>&1 \
 elif [[ -n "${CLAUDE_BIN:-}" ]] || command -v claude >/dev/null 2>&1 \
         || [[ -x "$HOME/.local/bin/claude" ]]; then
     exec "$REPO_DIR/scripts/digest_claude.sh"
+elif [[ -n "${DSH_BIN:-}" ]] || command -v dsh >/dev/null 2>&1; then
+    exec "$REPO_DIR/scripts/digest_dsh.sh"
 else
-    echo "$(date '+%F %T') no codex, opencode, kimi, or claude CLI found; set CODEX_BIN, KIMI_BIN, or CLAUDE_BIN" >&2
+    echo "$(date '+%F %T') no codex, opencode, kimi, claude, or dsh CLI found; set CODEX_BIN, KIMI_BIN, or CLAUDE_BIN" >&2
     exit 1
 fi
