@@ -25,6 +25,8 @@
         <string>@KIMI_CODE_HOME@</string>
         <key>CLAUDE_CONFIG_DIR</key>
         <string>@CLAUDE_CONFIG_DIR@</string>
+        <key>TRAE_HOME</key>
+        <string>@TRAE_HOME@</string>
     </dict>
 </dict>
 </plist>
